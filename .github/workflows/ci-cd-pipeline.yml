@@ -1,0 +1,65 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'Project1/**'
+      - 'Project2/**'
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      project1_changed: ${{ steps.filter.outputs.project1 }}
+      project2_changed: ${{ steps.filter.outputs.project2 }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Filter changes
+      id: filter
+      uses: dorny/paths-filter@v2
+      with:
+        filters: |
+          project1:
+            - 'Project1/**'
+          project2:
+            - 'Project2/**'
+
+  build-and-push:
+    needs: filter
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: [Project1, Project2]
+    env:
+      AWS_REGION: us-west-2  # Replace with your AWS region
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+
+    - name: Install dependencies
+      run: pip install boto3 docker
+
+    - name: Build and push Docker image
+      if: ${{ matrix.project == 'Project1' && needs.filter.outputs.project1_changed == 'true' || matrix.project == 'Project2' && needs.filter.outputs.project2_changed == 'true' }}
+      env:
+        PROJECT_REPOSITORY: ${{ matrix.project == 'Project1' && 'project1-repository' || 'project2-repository' }}
+      run: |
+        python .github/scripts/build_and_push.py ${{ matrix.project }} $PROJECT_REPOSITORY $AWS_ACCOUNT_ID $AWS_REGION
