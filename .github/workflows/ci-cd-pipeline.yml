@@ -1,67 +1,80 @@
-name: CI/CD Pipeline
+name: Build and Push Docker to ECR
 
 on:
-  pull_request:
-    branches:
-      - main
+  push:
     paths:
-      - 'Project1/**'
-      - 'Project2/**'
+      - 'project1/**'
+      - 'project2/**'
+  pull_request:
+    paths:
+      - 'project1/**'
+      - 'project2/**'
+
 jobs:
-  filter:
+  build-and-push-project1:
     runs-on: ubuntu-latest
-    outputs:
-      project1_changed: ${{ steps.filter.outputs.project1 }}
-      project2_changed: ${{ steps.filter.outputs.project2 }}
+    if: contains(github.event.head_commit.message, 'project1') || contains(github.event.pull_request.title, 'project1') || contains(github.event.pull_request.body, 'project1')
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Filter changes
-      id: filter
-      uses: dorny/paths-filter@v2
-      with:
-        filters: |
-          project1:
-            - 'Project1/**'
-          project2:
-            - 'Project2/**'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-  build-and-push:
-    needs: filter
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Login to AWS ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Build Docker image for project1
+        run: |
+          IMAGE_URI="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/project1:latest"
+          docker build -t $IMAGE_URI ./project1
+          echo $IMAGE_URI > image-uri-project1.txt
+
+      - name: Push Docker image to ECR for project1
+        run: |
+          IMAGE_URI=$(cat image-uri-project1.txt)
+          docker push $IMAGE_URI
+
+  build-and-push-project2:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        project: [Project1, Project2]
-    env:
-      AWS_REGION: us-west-2  # Replace with your AWS region
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    if: contains(github.event.head_commit.message, 'project2') || contains(github.event.pull_request.title, 'project2') || contains(github.event.pull_request.body, 'project2')
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-      
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-    - name: Log in to Amazon ECR
-      uses: aws-actions/amazon-ecr-login@v1
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.8'
+      - name: Login to AWS ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Install dependencies
-      run: pip install boto3 docker
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Build and push Docker image
-      if: ${{ matrix.project == 'Project1' && needs.filter.outputs.project1_changed == 'true' || matrix.project == 'Project2' && needs.filter.outputs.project2_changed == 'true' }}
-      env:
-        PROJECT_REPOSITORY: ${{ matrix.project == 'Project1' && 'project1-repository' || 'project2-repository' }}
-      run: |
-        python .github/scripts/build_and_push.py ${{ matrix.project }} $PROJECT_REPOSITORY $AWS_ACCOUNT_ID $AWS_REGION
+      - name: Build Docker image for project2
+        run: |
+          IMAGE_URI="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/project2:latest"
+          docker build -t $IMAGE_URI ./project2
+          echo $IMAGE_URI > image-uri-project2.txt
+
+      - name: Push Docker image to ECR for project2
+        run: |
+          IMAGE_URI=$(cat image-uri-project2.txt)
+          docker push $IMAGE_URI
